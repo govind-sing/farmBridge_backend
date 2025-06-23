@@ -1,59 +1,52 @@
 // backend/server.js
+
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const dotenv = require('dotenv');
+const path = require('path');
 
 // Load environment variables
 dotenv.config();
 
 const app = express();
-app.use('/uploads', express.static('uploads'));
 
-// Middleware
-app.use(cors({
-  origin: 'http://localhost:3000',
-  methods: ['GET', 'POST', 'PUT', 'DELETE'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-}));
-app.use(express.json()); // Parse JSON bodies
+// Serve static files from /uploads
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-// Import Routes
-const authRoutes = require('./routes/auth');
-const productRoutes = require('./routes/products');
-const orderRoutes = require('./routes/order'); // Corrected from 'orders' to match filename
-const plantRoutes = require('./routes/plant');
-const foodRoutes = require('./routes/food');
-const cartRoutes = require('./routes/cart');
+// Enable CORS for all origins
+app.use(cors());
 
-// Use Routes
-app.use('/api/auth', authRoutes);
-app.use('/api/product', productRoutes);
-app.use('/api/order', orderRoutes); 
-app.use('/api/plant', plantRoutes);
-app.use('/api/food', foodRoutes);
-app.use('/api/cart', cartRoutes);
+// Parse JSON bodies
+app.use(express.json());
+
+// Routes
+app.use('/api/auth', require('./routes/auth'));
+app.use('/api/product', require('./routes/products'));
+app.use('/api/order', require('./routes/order'));
+app.use('/api/plant', require('./routes/plant'));
+app.use('/api/food', require('./routes/food'));
+app.use('/api/cart', require('./routes/cart'));
 
 // MongoDB Connection
-mongoose
-  .connect(process.env.MONGO_URI)
-  .then(() => console.log('MongoDB connected'))
+mongoose.connect(process.env.MONGO_URI)
+  .then(() => console.log('✅ MongoDB connected'))
   .catch((err) => {
-    console.error('MongoDB connection error:', err);
-    process.exit(1); // Exit process if MongoDB fails to connect
+    console.error('❌ MongoDB connection error:', err);
+    process.exit(1);
   });
 
-// Basic Route
+// Basic Health Check Route
 app.get('/', (req, res) => {
-  res.send('Agri Market Backend');
+  res.send('🌾 Agri Market Backend is running!');
 });
 
 // Start Server
 const PORT = process.env.PORT || 5001;
 app.listen(PORT, (err) => {
   if (err) {
-    console.error('Server failed to start:', err);
+    console.error('❌ Server failed to start:', err);
     process.exit(1);
   }
-  console.log(`Server running on port ${PORT}`);
+  console.log(`🚀 Server running on port ${PORT}`);
 });
