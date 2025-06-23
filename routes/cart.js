@@ -80,7 +80,7 @@ router.delete('/remove/:productId', auth, async (req, res) => {
     cart.products = cart.products.filter((p) => p.productId.toString() !== req.params.productId);
     
     if (cart.products.length === initialLength) {
-      console.log(`Product ${req.params.productId} not found in cart for user ${req.user.id}`);
+      // console.log(`Product ${req.params.productId} not found in cart for user ${req.user.id}`);
       return res.status(404).json({ msg: 'Product not found in cart' });
     }
 

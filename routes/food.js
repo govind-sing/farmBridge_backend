@@ -1,22 +1,12 @@
 const express = require('express');
 const router = express.Router();
-const RiveScript = require('rivescript');
 const axios = require('axios');
-const path = require('path');
 require('dotenv').config();
 
-// Load RiveScript
-const bot = new RiveScript();
-bot.loadFile(path.join(__dirname, 'food.rive')).then(() => {
-  bot.sortReplies();
-}).catch(err => {
-  console.error("Error loading RiveScript file:", err);
-});
-
-// Common words to ignore
+// Common words to ignore when extracting food name
 const ignoreWords = [
   "tell", "me", "about", "how", "many", "calories",
-  "in", "a", "the", "is", "are", "what", "do", "you", "know"
+  "in", "a", "the", "is", "are", "what", "do", "you", "know", "of", "for"
 ];
 
 // USDA API functions
@@ -25,7 +15,6 @@ async function searchFood(foodName) {
     const url = `https://api.nal.usda.gov/fdc/v1/foods/search?query=${foodName}&dataType=Foundation,Survey (FNDDS),SR Legacy&pageSize=10&api_key=${process.env.USDA_API_KEY}`;
     const response = await axios.get(url);
     const data = response.data;
-
     if (data.foods && data.foods.length > 0) {
       for (const food of data.foods) {
         if (food.description.toLowerCase().includes(foodName.toLowerCase())) {
@@ -34,7 +23,6 @@ async function searchFood(foodName) {
       }
       return data.foods[0].fdcId;
     }
-
     return null;
   } catch (error) {
     console.error(`Error searching food: ${error.message}`);
@@ -117,16 +105,16 @@ function extractNutrition(foodData) {
 
       const threshold = goodSourceThresholds[nutrientName];
       if (threshold !== undefined && parseFloat(nutrient.amount) >= threshold) {
-        nutritionInfo += `  - Note: This food is a good source of ${nutrientName}.\n`;
+        nutritionInfo += `  - Note: Good source of ${nutrientName}.\n`;
         const pairing = foodPairings[nutrientName];
         if (pairing) {
-          nutritionInfo += `  - Try combining it with ${pairing}.\n`;
+          nutritionInfo += `  - Try combining with ${pairing}.\n`;
         }
       }
 
       const excessThreshold = excessThresholds[nutrientName];
       if (excessThreshold !== undefined && parseFloat(nutrient.amount) > excessThreshold) {
-        nutritionInfo += `  - Warning: The amount of ${nutrientName} is high. Limit excessive intake.\n`;
+        nutritionInfo += `  - Warning: High amount of ${nutrientName}. May not be suitable in excess.\n`;
       }
 
       nutritionInfo += "\n";
@@ -137,13 +125,13 @@ function extractNutrition(foodData) {
   if (waterNutrient && waterNutrient.amount !== null) {
     const waterContent = waterNutrient.formatted;
     nutritionInfo += `Water Content: ${waterContent}\n`;
-    nutritionInfo += "  - Importance: Helps in hydration, digestion, and temperature regulation.\n\n";
+    nutritionInfo += "  - Importance: High water content helps in hydration, digestion, and temperature regulation.\n\n";
   }
 
   if (nutritionInfo === `Food: ${description} (per 100g)\n\n`) {
     nutritionInfo = `Food: ${description}\nNo significant nutritional data available.`;
   } else {
-    nutritionInfo += "Note: Serving sizes vary; this info is per 100g.\nConsult a nutritionist for personalized advice.";
+    nutritionInfo += "Note: This is approximate data per 100g. Serving size may vary.";
   }
 
   return nutritionInfo;
@@ -152,41 +140,30 @@ function extractNutrition(foodData) {
 // Route
 router.post('/info', async (req, res) => {
   const { query } = req.body;
-  if (!query) return res.status(400).json({ msg: 'No query provided' });
-
-  const userId = 'user';
-  const reply = await bot.reply(userId, query);
-
-  let foodName = null;
-  let isSpecificQuery = false;
-
-  if (reply.startsWith("[OKAY_TRIGGER]")) {
-    isSpecificQuery = true;
-    const match = query.match(/tell me about (.*)/i);
-    foodName = match ? match[1] : null;
-  } else {
-    const inputWords = query.toLowerCase().split(" ");
-    const potentialFood = inputWords.filter(word => !ignoreWords.includes(word)).join(" ");
-    foodName = potentialFood.trim() || null;
+  if (!query) {
+    return res.status(400).json({ msg: 'No query provided' });
   }
 
-  if (foodName) {
-    const fdcId = await searchFood(foodName);
-    if (fdcId) {
-      const foodData = await getFoodDetails(fdcId);
-      const nutritionInfo = extractNutrition(foodData);
-      const cleanReply = reply.replace("[OKAY_TRIGGER]", "").trim();
+  try {
+    const inputWords = query.toLowerCase().split(" ");
+    const potentialFood = inputWords.filter(word => !ignoreWords.includes(word)).join(" ");
+    const foodName = potentialFood.trim();
 
-      if (isSpecificQuery) {
-        return res.json({ response: `${cleanReply}\n${nutritionInfo}` });
-      } else {
-        return res.json({ response: `Here's what I found for ${foodName}:\n${nutritionInfo}` });
-      }
-    } else {
-      return res.json({ response: "I couldn't find information about that food." });
+    if (!foodName) {
+      return res.json({ response: "Sorry, I couldn't extract a food item from your query." });
     }
-  } else {
-    return res.json({ response: reply });
+
+    const fdcId = await searchFood(foodName);
+    if (!fdcId) {
+      return res.json({ response: `Sorry, I couldn't find information for "${foodName}".` });
+    }
+
+    const foodData = await getFoodDetails(fdcId);
+    const nutritionInfo = extractNutrition(foodData);
+    return res.json({ response: nutritionInfo });
+  } catch (err) {
+    console.error("Error handling /info request:", err);
+    return res.status(500).json({ response: "An error occurred while processing your request." });
   }
 });
 
