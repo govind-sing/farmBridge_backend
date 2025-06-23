@@ -1,12 +1,17 @@
 const express = require('express');
 const router = express.Router();
-const AIML = require('aiml-high');
+const RiveScript = require('rivescript');
 const axios = require('axios');
+const path = require('path');
 require('dotenv').config();
 
-// Initialize AIML interpreter
-const aiml = new AIML();
-aiml.loadFiles(['./food.aiml']);
+// Load RiveScript
+const bot = new RiveScript();
+bot.loadFile(path.join(__dirname, 'food.rive')).then(() => {
+  bot.sortReplies();
+}).catch(err => {
+  console.error("Error loading RiveScript file:", err);
+});
 
 // Common words to ignore
 const ignoreWords = [
@@ -18,44 +23,32 @@ const ignoreWords = [
 async function searchFood(foodName) {
   try {
     const url = `https://api.nal.usda.gov/fdc/v1/foods/search?query=${foodName}&dataType=Foundation,Survey (FNDDS),SR Legacy&pageSize=10&api_key=${process.env.USDA_API_KEY}`;
-    // console.log(`Search URL: ${url}`);
     const response = await axios.get(url);
     const data = response.data;
-    // console.log(`Search Response for ${foodName}:`, JSON.stringify(data, null, 2));
+
     if (data.foods && data.foods.length > 0) {
       for (const food of data.foods) {
         if (food.description.toLowerCase().includes(foodName.toLowerCase())) {
-          // console.log(`Found fdcId: ${food.fdcId}, Description: ${food.description}`);
           return food.fdcId;
         }
       }
-      // console.log(`Fallback fdcId: ${data.foods[0].fdcId}, Description: ${data.foods[0].description}`);
       return data.foods[0].fdcId;
     }
-    // console.log(`No foods found for ${foodName}`);
+
     return null;
   } catch (error) {
     console.error(`Error searching food: ${error.message}`);
-    if (error.response) {
-      console.error(`Search Error Response:`, JSON.stringify(error.response.data, null, 2));
-    }
     return null;
   }
 }
 
 async function getFoodDetails(fdcId) {
   try {
-    // Try /food/ endpoint (singular, as in your Python code)
     const url = `https://api.nal.usda.gov/fdc/v1/food/${fdcId}?api_key=${process.env.USDA_API_KEY}`;
-    // console.log(`Fetching details from URL: ${url}`);
     const response = await axios.get(url);
-    // console.log(`Details Response for fdcId ${fdcId}:`, JSON.stringify(response.data, null, 2));
     return response.data;
   } catch (error) {
-    console.error(`Error fetching food details from /food/: ${error.message}`);
-    if (error.response) {
-      console.error(`Details Error Response from /food/:`, JSON.stringify(error.response.data, null, 2));
-    }
+    console.error(`Error fetching food details: ${error.message}`);
     return null;
   }
 }
@@ -124,16 +117,16 @@ function extractNutrition(foodData) {
 
       const threshold = goodSourceThresholds[nutrientName];
       if (threshold !== undefined && parseFloat(nutrient.amount) >= threshold) {
-        nutritionInfo += `  - Note: This food is a good source of ${nutrientName} and may help if you're deficient in it.\n`;
+        nutritionInfo += `  - Note: This food is a good source of ${nutrientName}.\n`;
         const pairing = foodPairings[nutrientName];
         if (pairing) {
-          nutritionInfo += `  - For best results, consider combining it with ${pairing}.\n`;
+          nutritionInfo += `  - Try combining it with ${pairing}.\n`;
         }
       }
 
       const excessThreshold = excessThresholds[nutrientName];
       if (excessThreshold !== undefined && parseFloat(nutrient.amount) > excessThreshold) {
-        nutritionInfo += `  - Warning: The amount of ${nutrientName} is high. Excessive consumption may not be recommended.\n`;
+        nutritionInfo += `  - Warning: The amount of ${nutrientName} is high. Limit excessive intake.\n`;
       }
 
       nutritionInfo += "\n";
@@ -144,63 +137,57 @@ function extractNutrition(foodData) {
   if (waterNutrient && waterNutrient.amount !== null) {
     const waterContent = waterNutrient.formatted;
     nutritionInfo += `Water Content: ${waterContent}\n`;
-    nutritionInfo += "  - Importance: High water content helps in hydration, digestion, and temperature regulation.\n\n";
+    nutritionInfo += "  - Importance: Helps in hydration, digestion, and temperature regulation.\n\n";
   }
 
   if (nutritionInfo === `Food: ${description} (per 100g)\n\n`) {
     nutritionInfo = `Food: ${description}\nNo significant nutritional data available.`;
   } else {
-    nutritionInfo += "Note: Serving sizes vary; this information is per 100g. Consult a nutritionist for personalized recommendations.";
+    nutritionInfo += "Note: Serving sizes vary; this info is per 100g.\nConsult a nutritionist for personalized advice.";
   }
 
   return nutritionInfo;
 }
 
-// Food Info Route
-router.post('/info', (req, res) => {
+// Route
+router.post('/info', async (req, res) => {
   const { query } = req.body;
-  if (!query) {
-    return res.status(400).json({ msg: 'No query provided' });
+  if (!query) return res.status(400).json({ msg: 'No query provided' });
+
+  const userId = 'user';
+  const reply = await bot.reply(userId, query);
+
+  let foodName = null;
+  let isSpecificQuery = false;
+
+  if (reply.startsWith("[OKAY_TRIGGER]")) {
+    isSpecificQuery = true;
+    const match = query.match(/tell me about (.*)/i);
+    foodName = match ? match[1] : null;
+  } else {
+    const inputWords = query.toLowerCase().split(" ");
+    const potentialFood = inputWords.filter(word => !ignoreWords.includes(word)).join(" ");
+    foodName = potentialFood.trim() || null;
   }
 
-  aiml.findAnswer(query, async (answer, wildCardArray) => {
-    if (!answer) {
-      return res.json({ response: "I’m not sure how to respond to that." });
-    }
+  if (foodName) {
+    const fdcId = await searchFood(foodName);
+    if (fdcId) {
+      const foodData = await getFoodDetails(fdcId);
+      const nutritionInfo = extractNutrition(foodData);
+      const cleanReply = reply.replace("[OKAY_TRIGGER]", "").trim();
 
-    let foodName = null;
-    let isSpecificQuery = false;
-
-    if (answer.includes("let me get the information")) {
-      isSpecificQuery = true;
-      foodName = wildCardArray[0];
-    } else {
-      const inputWords = query.toLowerCase().split(" ");
-      const potentialFood = inputWords.filter(word => !ignoreWords.includes(word)).join(" ");
-      foodName = potentialFood.trim() || null;
-    }
-
-    if (foodName) {
-      const fdcId = await searchFood(foodName);
-      if (fdcId) {
-        const foodData = await getFoodDetails(fdcId);
-        const nutritionInfo = extractNutrition(foodData);
-        if (isSpecificQuery) {
-          return res.json({ response: `${answer}\n${nutritionInfo}` });
-        } else {
-          return res.json({ response: `Here's what I found for ${foodName}:\n${nutritionInfo}` });
-        }
+      if (isSpecificQuery) {
+        return res.json({ response: `${cleanReply}\n${nutritionInfo}` });
       } else {
-        if (isSpecificQuery) {
-          return res.json({ response: `${answer}\nSorry, I couldn't find information for that food.` });
-        } else {
-          return res.json({ response: "I couldn't find information about that." });
-        }
+        return res.json({ response: `Here's what I found for ${foodName}:\n${nutritionInfo}` });
       }
     } else {
-      return res.json({ response: answer });
+      return res.json({ response: "I couldn't find information about that food." });
     }
-  });
+  } else {
+    return res.json({ response: reply });
+  }
 });
 
 module.exports = router;
