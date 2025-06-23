@@ -1,3 +1,4 @@
+// backend/routes/cartRoute.js
 const express = require('express');
 const router = express.Router();
 const auth = require('../middleware/auth');
@@ -74,9 +75,15 @@ router.delete('/remove/:productId', auth, async (req, res) => {
       return res.status(404).json({ msg: 'Cart not found' });
     }
 
+    const initialLength = cart.products.length;
     // Remove product from cart
     cart.products = cart.products.filter((p) => p.productId.toString() !== req.params.productId);
     
+    if (cart.products.length === initialLength) {
+      console.log(`Product ${req.params.productId} not found in cart for user ${req.user.id}`);
+      return res.status(404).json({ msg: 'Product not found in cart' });
+    }
+
     await cart.save();
     await cart.populate('products.productId');
     res.json(cart);
