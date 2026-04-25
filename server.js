@@ -24,8 +24,6 @@ app.use(express.json());
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/product', require('./routes/products'));
 app.use('/api/order', require('./routes/order'));
-app.use('/api/plant', require('./routes/plant'));
-app.use('/api/food', require('./routes/food'));
 app.use('/api/cart', require('./routes/cart'));
 
 // MongoDB Connection
