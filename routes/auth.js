@@ -5,6 +5,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const auth = require('../middleware/auth');
 const User = require('../models/User');
+const Product = require('../models/Product');
 
 // POST /api/auth/register - Register a new user
 router.post('/register', async (req, res) => {
@@ -98,5 +99,47 @@ router.put('/update-address', auth, async (req, res) => {
     res.status(500).json({ msg: 'Server error' });
   }
 });
+
+
+
+router.get('/:id/profile', async (req, res) => {
+  try {
+    const farmer = await User.findById(req.params.id).select(
+      'name bio location profilePicture role createdAt'
+    );
+ 
+    if (!farmer) return res.status(404).json({ msg: 'Farmer not found' });
+ 
+    // Only expose community (seller) profiles publicly
+    if (farmer.role !== 'community') {
+      return res.status(403).json({ msg: 'Profile not available' });
+    }
+ 
+    // Fetch all products listed by this farmer that still have stock
+    const products = await Product.find({ seller: req.params.id })
+      .select('name price quantity description image averageRating totalRatings createdAt')
+      .sort({ createdAt: -1 });
+ 
+    res.json({
+      farmer: {
+        _id:            farmer._id,
+        name:           farmer.name,
+        bio:            farmer.bio || null,
+        location:       farmer.location || null,
+        profilePicture: farmer.profilePicture || null,
+        role:           farmer.role,
+        memberSince:    farmer.createdAt,
+      },
+      products,
+      totalProducts:    products.length,
+      productsInStock:  products.filter(p => p.quantity > 0).length,
+    });
+  } catch (err) {
+    console.error('Error fetching farmer profile:', err);
+    if (err.kind === 'ObjectId') return res.status(404).json({ msg: 'Farmer not found' });
+    res.status(500).json({ msg: 'Server error' });
+  }
+});
+ 
 
 module.exports = router;
